@@ -872,6 +872,33 @@ async def test_handle_callback_cancel_without_task_acknowledges() -> None:
     assert "nothing is currently running" in bot.callback_calls[-1]["text"].lower()
 
 
+@pytest.mark.anyio
+async def test_handle_callback_server_load_sends_status_message() -> None:
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+    query = TelegramCallbackQuery(
+        transport="telegram",
+        chat_id=123,
+        message_id=55,
+        callback_query_id="cbq-load-1",
+        data=telegram_loop.SERVER_LOAD_CALLBACK_DATA,
+        sender_id=123,
+    )
+
+    await telegram_loop._handle_callback_server_load(cfg, query)
+
+    assert transport.send_calls
+    sent = transport.send_calls[0]
+    assert "Статус нагрузки сервера:" in sent["message"].text
+    options = cast(SendOptions, sent["options"])
+    assert options is not None
+    assert options.reply_to is not None
+    assert options.reply_to.message_id == 55
+    bot = cast(FakeBot, cfg.bot)
+    assert bot.callback_calls
+    assert bot.callback_calls[-1]["text"] == "Отправила статус сервера."
+
+
 def test_allowed_chat_ids_include_allowed_user_ids() -> None:
     cfg = replace(make_cfg(FakeTransport()), allowed_user_ids=(42,))
     allowed = telegram_loop._allowed_chat_ids(cfg)

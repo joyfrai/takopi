@@ -4,7 +4,9 @@ from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
+import os
 from pathlib import Path
+import shutil
 from typing import TYPE_CHECKING, cast
 
 import anyio
@@ -20,7 +22,7 @@ from ..runners.run_options import EngineRunOptions
 from ..scheduler import ThreadJob, ThreadScheduler
 from ..progress import ProgressTracker
 from ..settings import TelegramTransportSettings
-from ..transport import MessageRef, SendOptions
+from ..transport import MessageRef, RenderedMessage, SendOptions
 from ..transport_runtime import ResolvedMessage
 from ..context import RunContext
 from ..ids import RESERVED_CHAT_COMMANDS
@@ -81,6 +83,7 @@ ForwardKey = tuple[int, int, int]
 MessageKey = tuple[int, int]
 _SEEN_MESSAGES_LIMIT = 2048
 _SEEN_UPDATES_LIMIT = 4096
+SERVER_LOAD_CALLBACK_DATA = "joy:server-load"
 
 _handle_file_put_default = handle_file_put_default
 
@@ -95,6 +98,81 @@ def _chat_session_key(
     if msg.sender_id is None:
         return None
     return (msg.chat_id, msg.sender_id)
+
+
+def _callback_thread_id(query: TelegramCallbackQuery) -> int | None:
+    raw = query.raw if isinstance(query.raw, dict) else {}
+    msg = raw.get("message") if isinstance(raw, dict) else None
+    if not isinstance(msg, dict):
+        return None
+    thread_id = msg.get("message_thread_id")
+    if isinstance(thread_id, int):
+        return thread_id
+    return None
+
+
+def _read_mem_usage() -> tuple[float | None, float | None]:
+    mem_total_kb: float | None = None
+    mem_available_kb: float | None = None
+    try:
+        text = Path("/proc/meminfo").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None, None
+    for line in text.splitlines():
+        if line.startswith("MemTotal:"):
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    mem_total_kb = float(parts[1])
+                except ValueError:
+                    mem_total_kb = None
+        elif line.startswith("MemAvailable:"):
+            parts = line.split()
+            if len(parts) >= 2:
+                try:
+                    mem_available_kb = float(parts[1])
+                except ValueError:
+                    mem_available_kb = None
+    if not mem_total_kb or mem_available_kb is None:
+        return None, None
+    used_pct = max(0.0, min(100.0, ((mem_total_kb - mem_available_kb) / mem_total_kb) * 100.0))
+    available_gb = mem_available_kb / (1024.0 * 1024.0)
+    return used_pct, available_gb
+
+
+def _server_load_status_text() -> str:
+    load1, load5, load15 = os.getloadavg()
+    cpu_count = os.cpu_count() or 1
+    cpu_load_pct = (load1 / float(cpu_count)) * 100.0
+
+    mem_used_pct, mem_available_gb = _read_mem_usage()
+    disk = shutil.disk_usage("/")
+    disk_used_pct = (disk.used / disk.total) * 100.0 if disk.total > 0 else 0.0
+
+    lines = [
+        "Статус нагрузки сервера:",
+        f"- CPU loadavg: {load1:.2f}/{load5:.2f}/{load15:.2f} (~{cpu_load_pct:.1f}% от {cpu_count} vCPU)",
+        f"- RAM: used={mem_used_pct:.1f}% available={mem_available_gb:.2f} GB" if mem_used_pct is not None and mem_available_gb is not None else "- RAM: n/a",
+        f"- Disk /: used={disk_used_pct:.1f}% ({disk.used // (1024**3)}G/{disk.total // (1024**3)}G)",
+    ]
+    return "\n".join(lines)
+
+
+async def _handle_callback_server_load(cfg: TelegramBridgeConfig, query: TelegramCallbackQuery) -> None:
+    thread_id = _callback_thread_id(query)
+    message = RenderedMessage(text=_server_load_status_text())
+    await cfg.exec_cfg.transport.send(
+        channel_id=query.chat_id,
+        message=message,
+        options=SendOptions(
+            reply_to=MessageRef(channel_id=query.chat_id, message_id=query.message_id),
+            thread_id=thread_id,
+        ),
+    )
+    await cfg.bot.answer_callback_query(
+        callback_query_id=query.callback_query_id,
+        text="Отправила статус сервера.",
+    )
 
 
 async def _resolve_engine_run_options(
@@ -1838,6 +1916,12 @@ async def run_main_loop(
                             update,
                             state.running_tasks,
                             scheduler,
+                        )
+                    elif update.data == SERVER_LOAD_CALLBACK_DATA:
+                        tg.start_soon(
+                            _handle_callback_server_load,
+                            cfg,
+                            update,
                         )
                     else:
                         tg.start_soon(
