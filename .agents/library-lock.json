@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-04-20T09:11:31.269537+00:00",
+  "library_root": "/root/projects/ai-library",
+  "project_dir": "/root/projects/takopi",
+  "skills": [
+    {
+      "skill_id": "openai_skills::skills/.curated/gh-address-comments",
+      "repo_id": "openai_skills",
+      "repo_commit": "e940b8a86138adf03972802b990a1dfc57fcbf09",
+      "trust_tier": "trusted",
+      "domains": [],
+      "source": "/root/projects/ai-library/sources/openai_skills/skills/.curated/gh-address-comments",
+      "destination": "/root/projects/takopi/.agents/skills/gh-address-comments"
+    }
+  ],
+  "agents": []
+}
