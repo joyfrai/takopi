@@ -10,6 +10,7 @@ from .api_schemas import (
     CallbackQuery,
     Document,
     Message,
+    MessageEntity,
     PhotoSize,
     Sticker,
     Update,
@@ -25,6 +26,29 @@ from .types import (
 )
 
 logger = get_logger(__name__)
+
+
+def _append_text_link_entities(
+    text: str,
+    entities: list[MessageEntity] | None,
+) -> str:
+    if not entities:
+        return text
+    links: list[str] = []
+    for entity in entities:
+        if entity.type != "text_link":
+            continue
+        if not entity.url:
+            continue
+        links.append(entity.url.strip())
+    if not links:
+        return text
+    # Keep insertion order while dropping duplicates.
+    deduped_links = list(dict.fromkeys(link for link in links if link))
+    if not deduped_links:
+        return text
+    lines = "\n".join(f"- {url}" for url in deduped_links)
+    return f"{text}\n\n[links from entities]\n{lines}"
 
 
 def parse_incoming_update(
@@ -60,8 +84,10 @@ def _parse_incoming_message(
     raw_text = msg.text
     caption = msg.caption
     text = raw_text if raw_text is not None else caption
+    entities = msg.entities if raw_text is not None else msg.caption_entities
     if text is None:
         text = ""
+    text = _append_text_link_entities(text, entities)
     file_command = False
     stripped = text.lstrip()
     if stripped.startswith("/"):

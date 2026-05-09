@@ -9,6 +9,7 @@ from takopi.telegram.api_models import (
     Chat,
     Document,
     Message,
+    MessageEntity,
     MessageReply,
     PhotoSize,
     Sticker,
@@ -318,3 +319,69 @@ def test_parse_incoming_update_topic_fields() -> None:
     assert msg.is_topic_message is True
     assert msg.chat_type == "supergroup"
     assert msg.is_forum is True
+
+
+def test_parse_incoming_update_appends_hidden_text_links() -> None:
+    update = Update(
+        update_id=1,
+        message=Message(
+            message_id=10,
+            text="Читать подробности 😈",
+            entities=[
+                MessageEntity(
+                    type="text_link",
+                    offset=0,
+                    length=18,
+                    url="https://example.com/rag-paper",
+                ),
+                MessageEntity(
+                    type="text_link",
+                    offset=0,
+                    length=18,
+                    url="https://example.com/rag-paper",
+                ),
+            ],
+            chat=Chat(id=123, type="private"),
+        ),
+    )
+
+    msg = parse_incoming_update(update, chat_id=123)
+    assert isinstance(msg, TelegramIncomingMessage)
+    assert msg.text == (
+        "Читать подробности 😈\n\n"
+        "[links from entities]\n"
+        "- https://example.com/rag-paper"
+    )
+
+
+def test_parse_incoming_update_appends_caption_hidden_text_links() -> None:
+    update = Update(
+        update_id=1,
+        message=Message(
+            message_id=10,
+            caption="Подробнее",
+            caption_entities=[
+                MessageEntity(
+                    type="text_link",
+                    offset=0,
+                    length=8,
+                    url="https://example.com/caption-link",
+                )
+            ],
+            chat=Chat(id=123, type="private"),
+            document=Document(
+                file_id="doc-id",
+                file_name="doc.txt",
+                mime_type="text/plain",
+                file_size=4321,
+            ),
+        ),
+    )
+
+    msg = parse_incoming_update(update, chat_id=123)
+    assert isinstance(msg, TelegramIncomingMessage)
+    assert msg.text == (
+        "Подробнее\n\n"
+        "[links from entities]\n"
+        "- https://example.com/caption-link"
+    )

@@ -16,6 +16,7 @@ __all__ = [
     "File",
     "ForumTopic",
     "Message",
+    "MessageEntity",
     "MessageReply",
     "PhotoSize",
     "Sticker",
@@ -79,6 +80,13 @@ class Sticker(msgspec.Struct, forbid_unknown_fields=False):
     file_size: int | None = None
 
 
+class MessageEntity(msgspec.Struct, forbid_unknown_fields=False):
+    type: str
+    offset: int
+    length: int
+    url: str | None = None
+
+
 class MessageReply(msgspec.Struct, forbid_unknown_fields=False):
     message_id: int
     text: str | None = None
@@ -91,7 +99,9 @@ class Message(msgspec.Struct, forbid_unknown_fields=False):
     message_thread_id: int | None = None
     from_: User | None = msgspec.field(default=None, name="from")
     text: str | None = None
+    entities: list[MessageEntity] | None = None
     caption: str | None = None
+    caption_entities: list[MessageEntity] | None = None
     reply_to_message: MessageReply | None = None
     forward_from: User | None = None
     forward_from_chat: Chat | None = None
